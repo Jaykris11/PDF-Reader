@@ -6,38 +6,28 @@ import time
 from dotenv import load_dotenv
 
 # ---------------- PAGE CONFIG ----------------
-st.set_page_config(page_title="PDF Reader", page_icon="📐", layout="wide")
+st.set_page_config(page_title="Math PDF Assistant", page_icon="📐", layout="wide")
 
-# ---------------- THE ULTIMATE CENTERED DOCK CSS ----------------
+# ---------------- MODERN UI CSS ----------------
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     .stApp { background-color: #f0f4f9 !important; }
     
-    /* Center the main content area */
     .block-container { 
         max-width: 850px !important; 
         margin: 0 auto !important;
         padding-bottom: 280px !important; 
     }
 
-    /* --------------------------------------
-       THE FIX: CENTERED FLOATING BOTTOM DOCK
-       -------------------------------------- */
-    div[data-testid="stBottom"] {
-        background-color: transparent !important;
-    }
-
-    /* Forces the bottom container to match the width of your messages */
+    /* CENTERED FLOATING BOTTOM DOCK */
     div[data-testid="stBottom"] > div { 
         background-color: transparent !important; 
         max-width: 850px !important;
         margin: 0 auto !important;
-        padding: 0px 20px !important;
     }
 
-    /* Integrated Uploader Box */
     .stFileUploader {
         background-color: #ffffff;
         border: 1px solid #e5e7eb;
@@ -47,7 +37,6 @@ st.markdown("""
         box-shadow: 0 -4px 10px rgba(0,0,0,0.02);
     }
 
-    /* Pill Chat Input - FORCED ALIGNMENT */
     div[data-testid="stChatInput"] {
         background-color: #ffffff !important;
         border-radius: 0 0 24px 24px !important;
@@ -55,10 +44,9 @@ st.markdown("""
         box-shadow: 0 4px 12px rgba(0,0,0,0.05) !important;
     }
 
-    /* Chat Bubbles Styling */
     .stChatMessageAvatar { display: none; }
     [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) {
-        display: flex; flex-direction: row-reverse; text-align: right; background-color: transparent;
+        display: flex; flex-direction: row-reverse; text-align: right;
     }
     [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) [data-testid="stMarkdownContainer"] {
         background-color: #e3e3e3; color: #1f1f1f; padding: 12px 20px; border-radius: 20px;
@@ -68,24 +56,33 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ---------------- LOGIC ----------------
+# ---------------- LOGIC & SECURITY ----------------
 load_dotenv()
 HF_TOKEN = os.getenv("HF_TOKEN")
-client = InferenceClient(token=HF_TOKEN) if HF_TOKEN else None
+
+# Portfolio Fix: Prevent crash if recruiter hasn't set the token
+if not HF_TOKEN:
+    st.warning("🔒 **API Token Required**: To run this assistant, please set your `HF_TOKEN` in environment variables or Streamlit secrets.")
+    st.stop()
+
+client = InferenceClient(token=HF_TOKEN)
 
 def load_pdf(file):
     try:
         reader = PdfReader(file)
-        return " ".join([page.extract_text() or "" for page in reader.pages])
-    except: return ""
+        text = " ".join([page.extract_text() or "" for page in reader.pages])
+        if not text.strip():
+            return "EMPTY_ERR"
+        return text
+    except Exception:
+        return "LOAD_ERR"
 
 def generate(prompt, context=""):
     sys_prompt = (
         "You are an expert Math Document Assistant. "
-        "CRITICAL: When writing math, use double dollar signs for equations like this: $$integral symbols$$. "
-        "Do not use single slashes or parentheses for math. "
-        "ONLY answer questions based on the uploaded PDF. "
-        "If the user asks something unrelated to the document, refuse to answer.\n\n"
+        "Strictly analyze the PDF and solve mathematical problems. "
+        "Format all math using LaTeX with double dollar signs: $$...$$. "
+        "Refuse to answer questions unrelated to the document content.\n\n"
         f"PDF TEXT:\n{context[:4000]}"
     )
     
@@ -99,27 +96,28 @@ def generate(prompt, context=""):
         )
         return response.choices[0].message.content
     except Exception as e:
-        return f"Error: {str(e)}"
+        return f"Service currently unavailable: {str(e)}"
 
-# ---------------- STATE ----------------
+# ---------------- APP STATE ----------------
 if "messages" not in st.session_state: st.session_state.messages = []
 if "temp_pdf" not in st.session_state: st.session_state.temp_pdf = ""
 
-# ---------------- UI ----------------
+# ---------------- MAIN VIEW ----------------
 if not st.session_state.messages:
-    st.markdown("<h1 style='text-align:center; margin-top:10vh; color:#1f1f1f;'> PDF Reader</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align:center; color:gray;'>Upload your quiz and ask a question. The document is cleared after every response.</p>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align:center; margin-top:10vh; color:#1f1f1f;'>Math PDF Assistant</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align:center; color:gray;'>Upload your quiz below to begin. Documents are purged after each response.</p>", unsafe_allow_html=True)
 
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# --- THE DOCK (Always centered) ---
+# ---------------- CENTERED DOCK ----------------
 uploaded_file = st.file_uploader("Upload PDF", type="pdf", label_visibility="collapsed", key="dock_upload")
 if uploaded_file:
-    st.session_state.temp_pdf = load_pdf(uploaded_file)
+    with st.spinner(" "):
+        st.session_state.temp_pdf = load_pdf(uploaded_file)
 
-user_query = st.chat_input("Ask about the PDF...")
+user_query = st.chat_input("Analyze document...")
 
 if user_query:
     st.session_state.messages.append({"role": "user", "content": user_query})
@@ -128,15 +126,17 @@ if user_query:
 
     with st.chat_message("assistant"):
         if not st.session_state.temp_pdf:
-            ans = "❌ **No PDF found.** Please upload a file in the dock above for each prompt."
-            st.markdown(ans)
+            ans = "❌ **Document Required.** Please upload a PDF in the dock for every prompt."
+        elif st.session_state.temp_pdf == "EMPTY_ERR":
+            ans = "⚠️ **Scanned Image Detected.** This PDF contains no selectable text. Please use a text-based PDF."
+        elif st.session_state.temp_pdf == "LOAD_ERR":
+            ans = "❌ **Load Error.** Could not read the file. Try a different PDF."
         else:
-            with st.spinner("Processing..."):
+            with st.spinner(" "):
                 ans = generate(user_query, st.session_state.temp_pdf)
-            st.markdown(ans)
+        
+        st.markdown(ans)
     
     st.session_state.messages.append({"role": "assistant", "content": ans})
-    
-    # Reset PDF state so it must be uploaded again for next prompt
-    st.session_state.temp_pdf = "" 
+    st.session_state.temp_pdf = "" # The Purge
     st.rerun()
